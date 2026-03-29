@@ -1,0 +1,428 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// Auth & Users
+// ============================================================
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  TEAM_LEAD
+  MEMBER
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  role          UserRole  @default(MEMBER)
+  googleId      String?   @unique
+
+  // Relations
+  employee     Employee?
+  accounts     Account[]
+  sessions     Session[]
+  xpRecords    XpRecord[]
+  achievements UserAchievement[]
+  auditLogs    AuditLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+// ============================================================
+// HR & Employees
+// ============================================================
+
+enum Department {
+  ENGINEERING
+  DESIGN
+  QA
+  DEVOPS
+  PROJECT_MANAGEMENT
+  SALES
+  MARKETING
+  HR
+  FINANCE
+  MANAGEMENT
+}
+
+model Employee {
+  id         String     @id @default(cuid())
+  userId     String?    @unique
+  name       String
+  email      String     @unique
+  position   String
+  department Department
+  skills     String[]
+  salary     Decimal    @db.Decimal(12, 2)
+  level      Int        @default(1)
+  xp         Int        @default(0)
+  morale     Int        @default(75)
+  hireDate   DateTime
+  isActive   Boolean    @default(true)
+  avatar     String?
+
+  // External IDs
+  slackUserId  String?
+  githubHandle String?
+  jiraAccountId String?
+
+  // Relations
+  user            User?            @relation(fields: [userId], references: [id])
+  taskAssignments TaskAssignment[]
+  trainings       Training[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("employees")
+}
+
+model Training {
+  id         String   @id @default(cuid())
+  employeeId String
+  name       String
+  type       String   // certification, course, workshop
+  status     String   @default("planned") // planned, in_progress, completed
+  xpReward   Int      @default(50)
+  startDate  DateTime?
+  endDate    DateTime?
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("trainings")
+}
+
+// ============================================================
+// Clients
+// ============================================================
+
+model Client {
+  id                String  @id @default(cuid())
+  name              String
+  industry          String
+  contactName       String?
+  contactEmail      String?
+  satisfactionScore Int     @default(50) // 0-100
+  budgetTier        String  @default("MEDIUM") // LOW, MEDIUM, HIGH, ENTERPRISE
+  isActive          Boolean @default(true)
+
+  // Relations
+  projects Project[]
+  contracts Contract[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("clients")
+}
+
+model Contract {
+  id        String   @id @default(cuid())
+  clientId  String
+  type      String   // fixed_price, time_material, retainer, staff_augmentation
+  value     Decimal  @db.Decimal(14, 2)
+  startDate DateTime
+  endDate   DateTime?
+  status    String   @default("active") // active, completed, cancelled
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("contracts")
+}
+
+// ============================================================
+// Projects & Tasks
+// ============================================================
+
+enum ProjectStatus {
+  PLANNING
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+model Project {
+  id        String        @id @default(cuid())
+  name      String
+  clientId  String?
+  status    ProjectStatus @default(PLANNING)
+  techStack String[]
+  deadline  DateTime?
+  budget    Decimal?      @db.Decimal(14, 2)
+  actualCost Decimal?     @db.Decimal(14, 2)
+  progress  Int           @default(0) // 0-100
+  techDebt  Int           @default(0) // 0-100
+  methodology String      @default("agile") // agile, waterfall, kanban
+
+  // External IDs
+  jiraProjectKey String?
+  githubRepoUrl  String?
+
+  // Relations
+  client Client? @relation(fields: [clientId], references: [id])
+  sprints Sprint[]
+  tasks   Task[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("projects")
+}
+
+model Sprint {
+  id        String   @id @default(cuid())
+  projectId String
+  name      String
+  number    Int
+  startDate DateTime
+  endDate   DateTime
+  velocity  Int?
+  status    String   @default("planned") // planned, active, completed
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks   Task[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("sprints")
+}
+
+enum TaskStatus {
+  BACKLOG
+  TODO
+  IN_PROGRESS
+  CODE_REVIEW
+  QA
+  DONE
+  BLOCKED
+}
+
+model Task {
+  id          String     @id @default(cuid())
+  projectId   String
+  sprintId    String?
+  title       String
+  description String?
+  status      TaskStatus @default(BACKLOG)
+  priority    String     @default("medium") // low, medium, high, critical
+  storyPoints Int?
+  isBug       Boolean    @default(false)
+
+  // External IDs
+  jiraIssueKey String?
+
+  // Relations
+  project     Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sprint      Sprint?          @relation(fields: [sprintId], references: [id])
+  assignments TaskAssignment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("tasks")
+}
+
+model TaskAssignment {
+  id         String @id @default(cuid())
+  taskId     String
+  employeeId String
+
+  task     Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  assignedAt DateTime @default(now())
+
+  @@unique([taskId, employeeId])
+  @@map("task_assignments")
+}
+
+// ============================================================
+// Finance
+// ============================================================
+
+enum FinanceType {
+  REVENUE
+  EXPENSE
+}
+
+model Finance {
+  id          String      @id @default(cuid())
+  type        FinanceType
+  amount      Decimal     @db.Decimal(14, 2)
+  category    String      // salary, rent, cloud, tools, marketing, project_revenue, etc.
+  description String?
+  date        DateTime
+  projectId   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("finances")
+}
+
+// ============================================================
+// Gamification
+// ============================================================
+
+model XpRecord {
+  id        String   @id @default(cuid())
+  userId    String
+  amount    Int
+  source    String   // task_completed, on_time_delivery, zero_bugs, training, etc.
+  sourceId  String?  // reference to the entity that generated XP
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@map("xp_records")
+}
+
+model Achievement {
+  id          String @id @default(cuid())
+  code        String @unique
+  name        String
+  description String
+  icon        String
+  xpReward    Int    @default(100)
+  category    String // delivery, quality, growth, teamwork, finance
+
+  // Relations
+  userAchievements UserAchievement[]
+
+  @@map("achievements")
+}
+
+model UserAchievement {
+  id            String @id @default(cuid())
+  userId        String
+  achievementId String
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  unlockedAt DateTime @default(now())
+
+  @@unique([userId, achievementId])
+  @@map("user_achievements")
+}
+
+model Quest {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  target      Int      // target value to complete
+  current     Int      @default(0)
+  xpReward    Int      @default(200)
+  type        String   // weekly, monthly
+  category    String   // delivery, hiring, revenue, training
+  startDate   DateTime
+  endDate     DateTime
+  isCompleted Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("quests")
+}
+
+// ============================================================
+// Sync & Audit
+// ============================================================
+
+model SyncLog {
+  id        String   @id @default(cuid())
+  source    String   // google, jira, github, slack
+  action    String   // pull, push, full_sync
+  status    String   // success, failed, partial
+  details   String?
+  recordsAffected Int @default(0)
+
+  startedAt   DateTime @default(now())
+  completedAt DateTime?
+
+  @@map("sync_logs")
+}
+
+model AuditLog {
+  id       String  @id @default(cuid())
+  userId   String?
+  action   String  // create, update, delete
+  entity   String  // employee, project, task, finance, etc.
+  entityId String
+  oldValue String? // JSON
+  newValue String? // JSON
+
+  user User? @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@map("audit_logs")
+}
+
+// ============================================================
+// Company Settings
+// ============================================================
+
+model CompanySetting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+
+  updatedAt DateTime @updatedAt
+
+  @@map("company_settings")
+}
